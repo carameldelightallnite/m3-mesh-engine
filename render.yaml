@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: m3-mesh-engine
+    env: python
+    plan: free
+    buildCommand: ""
+    startCommand: python app.py
