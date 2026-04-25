@@ -5,7 +5,11 @@ app = Flask(__name__)
 OUT = "output"
 os.makedirs(OUT, exist_ok=True)
 
-def build_cube(sx, sy, sz):
+# -------------------------------
+# BASIC SHAPES
+# -------------------------------
+
+def cube(sx, sy, sz):
     hx, hy, hz = sx/2, sy/2, sz/2
     v = [
         (-hx,-hy,-hz),(hx,-hy,-hz),(hx,hy,-hz),(-hx,hy,-hz),
@@ -21,7 +25,7 @@ def build_cube(sx, sy, sz):
     ]
     return v,f
 
-def build_cylinder(sx, sy, sz, seg=24):
+def cylinder(sx, sy, sz, seg=24):
     r = sx/2
     h = sz/2
     v=[]; f=[]
@@ -37,7 +41,7 @@ def build_cylinder(sx, sy, sz, seg=24):
         f.append((i,n+1,i+1))
     return v,f
 
-def build_sphere(sx, sy, sz, rings=10, seg=20):
+def sphere(sx, sy, sz, rings=10, seg=20):
     r=sx/2
     v=[]; f=[]
     for i in range(rings+1):
@@ -59,57 +63,83 @@ def build_sphere(sx, sy, sz, rings=10, seg=20):
             f.append((a,d,c))
     return v,f
 
+# -------------------------------
+# SHAPE DETECTION (SIMPLE)
+# -------------------------------
+
 def detect_shape(sx, sy, sz):
-    if sz < sx*0.2:
+    if sz < sx*0.25:
         return "cube"
-    if abs(sx-sy) < 0.05:
+    if abs(sx - sy) < 0.05:
         return "cylinder"
     return "sphere"
 
-def write(path, verts, faces):
+# -------------------------------
+# WRITE DAE FILE
+# -------------------------------
+
+def write_dae(path, verts, faces):
     with open(path,"w") as f:
         f.write('<?xml version="1.0" encoding="utf-8"?>')
         f.write('<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">')
         f.write('<library_geometries><geometry id="mesh"><mesh>')
-        f.write(f'<source id="p"><float_array count="{len(verts)*3}">')
+        
+        f.write(f'<source id="pos"><float_array count="{len(verts)*3}">')
         for v in verts:
             f.write(f'{v[0]} {v[1]} {v[2]} ')
         f.write('</float_array></source>')
-        f.write('<vertices id="v"><input semantic="POSITION" source="#p"/></vertices>')
+        
+        f.write('<vertices id="verts"><input semantic="POSITION" source="#pos"/></vertices>')
+        
         f.write(f'<triangles count="{len(faces)}">')
-        f.write('<input semantic="VERTEX" source="#v" offset="0"/><p>')
+        f.write('<input semantic="VERTEX" source="#verts" offset="0"/><p>')
         for tri in faces:
             f.write(f'{tri[0]} {tri[1]} {tri[2]} ')
         f.write('</p></triangles>')
+        
         f.write('</mesh></geometry></library_geometries></COLLADA>')
+
+# -------------------------------
+# API ROUTES
+# -------------------------------
+
+@app.route("/")
+def home():
+    return "M3 Mesh Engine Running"
 
 @app.route("/convert", methods=["POST"])
 def convert():
-    data = request.json
+    data = request.json or {}
 
-    sx,sy,sz = 1,1,0.2
     try:
         sx,sy,sz = data["prims"][0]["size"]
     except:
-        pass
+        sx,sy,sz = 1,1,0.2
 
     shape = detect_shape(sx,sy,sz)
 
-    if shape=="cube":
-        v,f = build_cube(sx,sy,sz)
-    elif shape=="cylinder":
-        v,f = build_cylinder(sx,sy,sz)
+    if shape == "cube":
+        v,f = cube(sx,sy,sz)
+    elif shape == "cylinder":
+        v,f = cylinder(sx,sy,sz)
     else:
-        v,f = build_sphere(sx,sy,sz)
+        v,f = sphere(sx,sy,sz)
 
     name = str(uuid.uuid4()) + ".dae"
-    write(os.path.join(OUT,name), v, f)
+    path = os.path.join(OUT,name)
+
+    write_dae(path, v, f)
 
     return name
 
-@app.route("/output/<f>")
-def out(f):
-    return send_from_directory(OUT,f)
+@app.route("/output/<filename>")
+def output_file(filename):
+    return send_from_directory(OUT, filename)
+
+# -------------------------------
+# RENDER FIX (CRITICAL)
+# -------------------------------
 
 if __name__ == "__main__":
-    app.run(port=5000)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
