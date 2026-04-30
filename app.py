@@ -60,7 +60,7 @@ def buildsphere():
 
 
 # =========================
-# REAL CYLINDER (NEW)
+# REAL CYLINDER
 # =========================
 def buildcylinder():
     segments = 24
@@ -73,15 +73,17 @@ def buildcylinder():
     top_z = height / 2
     bottom_z = -height / 2
 
-    # top center
-    verts.append((0.0, 0.0, top_z))
-    # bottom center
-    verts.append((0.0, 0.0, bottom_z))
+    # centers
+    top_center = len(verts)
+    verts.append((0, 0, top_z))
 
-    # rings
+    bottom_center = len(verts)
+    verts.append((0, 0, bottom_z))
+
     top_ring = []
     bottom_ring = []
 
+    # rings
     for i in range(segments):
         theta = 2 * math.pi * i / segments
         x = radius * math.cos(theta)
@@ -97,30 +99,30 @@ def buildcylinder():
     for i in range(segments):
         a = top_ring[i]
         b = top_ring[(i + 1) % segments]
-        faces.append((0, a, b))
+        faces.append((top_center, a, b))
 
     # bottom cap
     for i in range(segments):
         a = bottom_ring[i]
         b = bottom_ring[(i + 1) % segments]
-        faces.append((1, b, a))
+        faces.append((bottom_center, b, a))
 
     # sides
     for i in range(segments):
-        top_a = top_ring[i]
-        top_b = top_ring[(i + 1) % segments]
+        t1 = top_ring[i]
+        t2 = top_ring[(i + 1) % segments]
 
-        bot_a = bottom_ring[i]
-        bot_b = bottom_ring[(i + 1) % segments]
+        b1 = bottom_ring[i]
+        b2 = bottom_ring[(i + 1) % segments]
 
-        faces.append((top_a, bot_a, top_b))
-        faces.append((top_b, bot_a, bot_b))
+        faces.append((t1, b1, t2))
+        faces.append((t2, b1, b2))
 
     write_dae(verts, faces)
 
 
 # =========================
-# SHARED DAE WRITER (UNCHANGED SYSTEM CORE)
+# DAE WRITER (UNCHANGED)
 # =========================
 def write_dae(verts, faces):
     vert_array = " ".join(f"{x} {y} {z}" for (x, y, z) in verts)
@@ -182,7 +184,7 @@ def write_dae(verts, faces):
 
 
 # =========================
-# API (UNCHANGED BEHAVIOR)
+# API (FIXED — SINGLE ROUTE)
 # =========================
 @app.route("/")
 def home():
@@ -191,11 +193,12 @@ def home():
 
 @app.route("/generate", methods=["POST"])
 def generate():
-    data = request.get_json(force=True)
+    data = request.data.decode("utf-8")
 
-    # ONLY ADDITION: SHAPE SWITCH
-    if "Cylinder" in str(data):
+    if "Cylinder" in data:
         buildcylinder()
+    elif "Sphere" in data:
+        buildsphere()
     else:
         buildsphere()
 
