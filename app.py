@@ -1,4 +1,4 @@
-from flask import Flask, request, send_file
+from flask import Flask, request, send_file, make_response
 import os
 
 app = Flask(__name__)
@@ -77,10 +77,17 @@ def generate():
 
         builddae()
 
-        return send_file(OUTPUT, as_attachment=True)
+        # 🔥 CRITICAL FIX
+        response = make_response("File ready: https://m3-mesh-engine.onrender.com/download")
+        response.headers["Content-Type"] = "text/plain"
+        return response
 
     except Exception as e:
         return str(e)
+
+@app.route("/download")
+def download():
+    return send_file(OUTPUT, as_attachment=True)
 
 if __name__ == "__main__":
     app.run()
