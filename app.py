@@ -6,16 +6,21 @@ app = Flask(__name__)
 OUTPUT = "sphere.dae"
 
 def buildsphere():
-    segments = 20
-    rings = 16
+    # Proven safe defaults for SL
+    segments = 24   # longitude
+    rings = 16      # latitude (excluding poles)
     radius = 0.1
 
     verts = []
     faces = []
 
-    # generate vertices
-    for i in range(rings + 1):
-        phi = math.pi * i / rings
+    # --- vertices ---
+    # top pole
+    verts.append((0.0, 0.0, radius))
+
+    # rings (exclude poles)
+    for i in range(1, rings):
+        phi = math.pi * i / rings  # 0..pi
         for j in range(segments):
             theta = 2 * math.pi * j / segments
             x = radius * math.sin(phi) * math.cos(theta)
@@ -23,23 +28,40 @@ def buildsphere():
             z = radius * math.cos(phi)
             verts.append((x, y, z))
 
-    # generate faces
-    for i in range(rings):
+    # bottom pole
+    verts.append((0.0, 0.0, -radius))
+
+    top_index = 0
+    bottom_index = len(verts) - 1
+
+    # --- faces (top cap) ---
+    for j in range(segments):
+        a = 1 + j
+        b = 1 + (j + 1) % segments
+        faces.append((top_index, a, b))
+
+    # --- faces (middle) ---
+    for i in range(1, rings - 1):
         for j in range(segments):
-            current = i * segments + j
+            current = 1 + (i - 1) * segments + j
             next = current + segments
 
-            next_j = (j + 1) % segments
-            current_right = i * segments + next_j
-            next_right = next + next_j
+            right = 1 + (i - 1) * segments + (j + 1) % segments
+            next_right = right + segments
 
-            if i != 0:
-                faces.append((current, next, current_right))
-            if i != rings - 1:
-                faces.append((current_right, next, next_right))
+            faces.append((current, next, right))
+            faces.append((right, next, next_right))
 
-    vert_array = " ".join(f"{v[0]} {v[1]} {v[2]}" for v in verts)
-    index_array = " ".join(str(i) for f in faces for i in f)
+    # --- faces (bottom cap) ---
+    start_last_ring = 1 + (rings - 2) * segments
+    for j in range(segments):
+        a = start_last_ring + j
+        b = start_last_ring + (j + 1) % segments
+        faces.append((a, bottom_index, b))
+
+    # --- flatten ---
+    vert_array = " ".join(f"{x} {y} {z}" for (x, y, z) in verts)
+    index_array = " ".join(str(i) for tri in faces for i in tri)
 
     dae = f"""<?xml version="1.0" encoding="utf-8"?>
 <COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
@@ -102,9 +124,9 @@ def home():
 @app.route("/generate", methods=["POST"])
 def generate():
     buildsphere()
-    response = make_response("Download ready")
-    response.headers["Content-Type"] = "text/plain"
-    return response
+    resp = make_response("Download ready")
+    resp.headers["Content-Type"] = "text/plain"
+    return resp
 
 @app.route("/download")
 def download():
