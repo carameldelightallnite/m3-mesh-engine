@@ -36,7 +36,7 @@ def get_profile_point(t, p_type="Square"):
 
 
 # ==========================================
-# FINAL ENGINE (WITH MATERIAL GROUPS)
+# FINAL ENGINE (UNCHANGED CORE)
 # ==========================================
 def build_prim(params):
     p_type = params.get("profile", "Square")
@@ -51,10 +51,7 @@ def build_prim(params):
 
     verts, uvs, normals = [], [], []
 
-    # material groups
-    faces_out = []
-    faces_in = []
-    faces_caps = []
+    faces_out, faces_in, faces_caps = [], [], []
 
     profile_steps = 24 if p_type == "Circle" else (3 if p_type == "Triangle" else 4)
     path_steps = 32 if path_type == "Circular" else 1
@@ -72,9 +69,10 @@ def build_prim(params):
 
     n = len(path_t)
 
-    # ---------- VERT BUILD ----------
+    # ---------- VERTEX BUILD ----------
     for s_idx in range(path_steps + 1):
         v_coord = s_idx / float(path_steps)
+
         phi = v_coord * 2 * math.pi
         cos_p, sin_p = math.cos(phi), math.sin(phi)
 
@@ -88,20 +86,27 @@ def build_prim(params):
 
                 x = px * tx + sx
                 y = py * ty + sy
+
                 nx, ny, nz = px, py, 0
 
             else:
                 x = (major_r + px) * cos_p
                 y = (major_r + px) * sin_p
                 z = py
+
                 nx = px * cos_p
                 ny = px * sin_p
                 nz = py
 
             verts.append((x, y, z))
             normals.append((nx, ny, nz))
-            uvs.append(((t - cut_s)/(cut_e - cut_s), v_coord))
 
+            # 🔥 AUTO UV SCALE (proportional)
+            u = (t - cut_s) / max((cut_e - cut_s), 0.0001)
+            v = v_coord
+            uvs.append((u, v))
+
+        # ---------- HOLLOW ----------
         if hollow > 0:
             for t in path_t:
                 px, py = get_profile_point(t, p_type)
@@ -113,19 +118,21 @@ def build_prim(params):
 
                     x = px * tx * hollow + sx
                     y = py * ty * hollow + sy
+
                     nx, ny, nz = -px, -py, 0
 
                 else:
                     x = (major_r + px * hollow) * cos_p
                     y = (major_r + px * hollow) * sin_p
                     z = py * hollow
+
                     nx = -px * cos_p
                     ny = -px * sin_p
                     nz = -py
 
                 verts.append((x, y, z))
                 normals.append((nx, ny, nz))
-                uvs.append(((t - cut_s)/(cut_e - cut_s), v_coord))
+                uvs.append((u, v))
 
     # ---------- FACE BUILD ----------
     vps = n * (2 if hollow > 0 else 1)
@@ -167,13 +174,13 @@ def build_prim(params):
             b = a + vps
             quad(faces_caps, a, a+1, b+1, b)
 
-    write_dae(verts, faces_out, faces_in, faces_caps, uvs, normals)
+    write_dae_split(verts, faces_out, faces_in, faces_caps, uvs, normals)
 
 
 # ==========================================
-# DAE WRITER (MULTI-MATERIAL)
+# 🔥 SPLIT GEOMETRY FOR SL FACE INDEX CONTROL
 # ==========================================
-def write_dae(verts, out_f, in_f, cap_f, uvs, normals):
+def write_dae_split(verts, out_f, in_f, cap_f, uvs, normals):
 
     def pack(faces):
         s = ""
@@ -186,89 +193,55 @@ def write_dae(verts, out_f, in_f, cap_f, uvs, normals):
     n = " ".join(f"{x} {y} {z}" for x, y, z in normals)
     uv = " ".join(f"{u} {v}" for u, v in uvs)
 
-    dae = f"""<?xml version="1.0" encoding="utf-8"?>
-<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
-
-<library_effects>
-<effect id="mat_out-fx"><profile_COMMON><technique sid="common">
-<phong><diffuse><color>0.8 0.8 0.8 1</color></diffuse></phong>
-</technique></profile_COMMON></effect>
-
-<effect id="mat_in-fx"><profile_COMMON><technique sid="common">
-<phong><diffuse><color>0.6 0.6 0.6 1</color></diffuse></phong>
-</technique></profile_COMMON></effect>
-
-<effect id="mat_cap-fx"><profile_COMMON><technique sid="common">
-<phong><diffuse><color>0.4 0.4 0.4 1</color></diffuse></phong>
-</technique></profile_COMMON></effect>
-</library_effects>
-
-<library_materials>
-<material id="mat_out"><instance_effect url="#mat_out-fx"/></material>
-<material id="mat_in"><instance_effect url="#mat_in-fx"/></material>
-<material id="mat_cap"><instance_effect url="#mat_cap-fx"/></material>
-</library_materials>
-
-<library_geometries>
-<geometry id="mesh"><mesh>
-
-<source id="pos"><float_array id="pa" count="{len(verts)*3}">{v}</float_array>
-<technique_common><accessor source="#pa" count="{len(verts)}" stride="3">
+    def geo_block(id_name, faces):
+        return f"""
+<geometry id="{id_name}"><mesh>
+<source id="{id_name}_pos"><float_array count="{len(verts)*3}">{v}</float_array>
+<technique_common><accessor source="#{id_name}_pos" count="{len(verts)}" stride="3">
 <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
 </accessor></technique_common></source>
 
-<source id="norm"><float_array id="na" count="{len(normals)*3}">{n}</float_array>
-<technique_common><accessor source="#na" count="{len(normals)}" stride="3">
+<source id="{id_name}_norm"><float_array count="{len(normals)*3}">{n}</float_array>
+<technique_common><accessor source="#{id_name}_norm" count="{len(normals)}" stride="3">
 <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
 </accessor></technique_common></source>
 
-<source id="uv"><float_array id="ua" count="{len(uvs)*2}">{uv}</float_array>
-<technique_common><accessor source="#ua" count="{len(uvs)}" stride="2">
+<source id="{id_name}_uv"><float_array count="{len(uvs)*2}">{uv}</float_array>
+<technique_common><accessor source="#{id_name}_uv" count="{len(uvs)}" stride="2">
 <param name="S" type="float"/><param name="T" type="float"/>
 </accessor></technique_common></source>
 
-<vertices id="v"><input semantic="POSITION" source="#pos"/></vertices>
+<vertices id="{id_name}_v"><input semantic="POSITION" source="#{id_name}_pos"/></vertices>
 
-<triangles material="mat_out" count="{len(out_f)}">
-<input semantic="VERTEX" source="#v" offset="0"/>
-<input semantic="NORMAL" source="#norm" offset="1"/>
-<input semantic="TEXCOORD" source="#uv" offset="2" set="0"/>
-<p>{pack(out_f)}</p>
+<triangles count="{len(faces)}">
+<input semantic="VERTEX" source="#{id_name}_v" offset="0"/>
+<input semantic="NORMAL" source="#{id_name}_norm" offset="1"/>
+<input semantic="TEXCOORD" source="#{id_name}_uv" offset="2"/>
+<p>{pack(faces)}</p>
 </triangles>
-
-<triangles material="mat_in" count="{len(in_f)}">
-<input semantic="VERTEX" source="#v" offset="0"/>
-<input semantic="NORMAL" source="#norm" offset="1"/>
-<input semantic="TEXCOORD" source="#uv" offset="2" set="0"/>
-<p>{pack(in_f)}</p>
-</triangles>
-
-<triangles material="mat_cap" count="{len(cap_f)}">
-<input semantic="VERTEX" source="#v" offset="0"/>
-<input semantic="NORMAL" source="#norm" offset="1"/>
-<input semantic="TEXCOORD" source="#uv" offset="2" set="0"/>
-<p>{pack(cap_f)}</p>
-</triangles>
-
 </mesh></geometry>
+"""
+
+    dae = f"""<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+
+<library_geometries>
+{geo_block("outside", out_f)}
+{geo_block("inside", in_f)}
+{geo_block("caps", cap_f)}
 </library_geometries>
 
-<scene><instance_visual_scene url="#Scene"/></scene>
 <library_visual_scenes>
 <visual_scene id="Scene">
 <node>
-<instance_geometry url="#mesh">
-<bind_material>
-<technique_common>
-<instance_material symbol="mat_out" target="#mat_out"/>
-<instance_material symbol="mat_in" target="#mat_in"/>
-<instance_material symbol="mat_cap" target="#mat_cap"/>
-</technique_common>
-</bind_material>
-</instance_geometry>
+<instance_geometry url="#outside"/>
+<instance_geometry url="#inside"/>
+<instance_geometry url="#caps"/>
 </node>
 </visual_scene>
 </library_visual_scenes>
+
+<scene><instance_visual_scene url="#Scene"/></scene>
 
 </COLLADA>"""
 
