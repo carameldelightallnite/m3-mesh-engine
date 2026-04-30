@@ -8,16 +8,12 @@ OUTPUT = "shape.dae"
 BASE_URL = "https://m3-mesh-engine.onrender.com"
 
 # =========================
-# NEW: SL-STYLE PRISM
+# REAL PRISM — SL WEDGE
 # =========================
 def buildprism():
-    width = 0.2
-    depth = 0.2
-    height = 0.2
-
-    w = width / 2
-    d = depth / 2
-    h = height / 2
+    w = 0.1
+    d = 0.1
+    h = 0.1
 
     verts = [
         (-w, -d, -h),  # 0 bottom back left
@@ -32,18 +28,12 @@ def buildprism():
     ]
 
     faces = [
-        # bottom
-        (0, 1, 2), (0, 2, 3),
-        # back wall
-        (0, 4, 1), (1, 4, 5),
-        # left slope
-        (0, 3, 4),
-        # right slope
-        (1, 5, 2),
-        # front slope
-        (3, 2, 6),
-        # top
-        (4, 6, 5)
+        (0,1,2),(0,2,3),      # bottom
+        (0,4,1),(1,4,5),      # back wall
+        (0,3,4),              # left slope
+        (1,5,2),              # right slope
+        (3,2,6),              # front slope
+        (4,6,5)               # top
     ]
 
     write_dae(verts, faces)
