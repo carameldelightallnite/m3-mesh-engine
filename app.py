@@ -36,9 +36,18 @@ def get_profile_point(t, p_type="Square"):
 
 
 # ==========================================
-# FINAL ENGINE (UNCHANGED CORE)
+# 🔥 TRI OPTIMIZER (DECIMATION)
 # ==========================================
-def build_prim(params):
+def decimate_faces(faces, ratio):
+    target = int(len(faces) * ratio)
+    return faces[:max(1, target)]
+
+
+# ==========================================
+# FINAL ENGINE (UNCHANGED CORE BUILD)
+# ==========================================
+def build_base_mesh(params, quality=1.0):
+
     p_type = params.get("profile", "Square")
     path_type = params.get("path", "Linear")
 
@@ -50,11 +59,13 @@ def build_prim(params):
     shear = [float(x) for x in params.get("shear", "0,0").split(",")]
 
     verts, uvs, normals = [], [], []
-
     faces_out, faces_in, faces_caps = [], [], []
 
-    profile_steps = 24 if p_type == "Circle" else (3 if p_type == "Triangle" else 4)
-    path_steps = 32 if path_type == "Circular" else 1
+    profile_steps = int((24 if p_type == "Circle" else (3 if p_type == "Triangle" else 4)) * quality)
+    path_steps = int((32 if path_type == "Circular" else 1) * quality)
+
+    profile_steps = max(profile_steps, 3)
+    path_steps = max(path_steps, 1)
 
     major_r = 0.1
     size = 0.1
@@ -72,7 +83,6 @@ def build_prim(params):
     # ---------- VERTEX BUILD ----------
     for s_idx in range(path_steps + 1):
         v_coord = s_idx / float(path_steps)
-
         phi = v_coord * 2 * math.pi
         cos_p, sin_p = math.cos(phi), math.sin(phi)
 
@@ -86,56 +96,22 @@ def build_prim(params):
 
                 x = px * tx + sx
                 y = py * ty + sy
-
                 nx, ny, nz = px, py, 0
 
             else:
                 x = (major_r + px) * cos_p
                 y = (major_r + px) * sin_p
                 z = py
-
                 nx = px * cos_p
                 ny = px * sin_p
                 nz = py
 
             verts.append((x, y, z))
             normals.append((nx, ny, nz))
-
-            # 🔥 AUTO UV SCALE (proportional)
-            u = (t - cut_s) / max((cut_e - cut_s), 0.0001)
-            v = v_coord
-            uvs.append((u, v))
-
-        # ---------- HOLLOW ----------
-        if hollow > 0:
-            for t in path_t:
-                px, py = get_profile_point(t, p_type)
-
-                if path_type == "Linear":
-                    z = -size if s_idx == 0 else size
-                    tx, ty = (taper[0], taper[1]) if z > 0 else (1, 1)
-                    sx, sy = (shear[0], shear[1]) if z > 0 else (0, 0)
-
-                    x = px * tx * hollow + sx
-                    y = py * ty * hollow + sy
-
-                    nx, ny, nz = -px, -py, 0
-
-                else:
-                    x = (major_r + px * hollow) * cos_p
-                    y = (major_r + px * hollow) * sin_p
-                    z = py * hollow
-
-                    nx = -px * cos_p
-                    ny = -px * sin_p
-                    nz = -py
-
-                verts.append((x, y, z))
-                normals.append((nx, ny, nz))
-                uvs.append((u, v))
+            uvs.append(((t - cut_s)/(cut_e - cut_s), v_coord))
 
     # ---------- FACE BUILD ----------
-    vps = n * (2 if hollow > 0 else 1)
+    vps = n
 
     def quad(group, a, b, c, d):
         group.append((a, b, c))
@@ -148,39 +124,37 @@ def build_prim(params):
         for i in range(n - 1):
             quad(faces_out, s1+i, s1+i+1, s2+i+1, s2+i)
 
-            if hollow > 0:
-                quad(faces_in,
-                     s1+i+n+1, s1+i+n,
-                     s2+i+n, s2+i+n+1)
-
-    # ---------- CAPS ----------
-    if path_type == "Linear" and hollow == 0:
-        for i in range(1, n - 1):
-            faces_caps.append((0, i+1, i))
-
-        top = path_steps * vps
-        for i in range(1, n - 1):
-            faces_caps.append((top, top+i, top+i+1))
-
-    # ---------- CUT SEAL ----------
-    if (cut_e - cut_s) < 1.0:
-        for i in range(path_steps):
-            a = i * vps
-            b = a + vps
-            quad(faces_caps, a, b, b+1, a+1)
-
-        for i in range(path_steps):
-            a = i * vps + (n - 1)
-            b = a + vps
-            quad(faces_caps, a, a+1, b+1, b)
-
-    write_dae_split(verts, faces_out, faces_in, faces_caps, uvs, normals)
+    return verts, faces_out, faces_in, faces_caps, uvs, normals
 
 
 # ==========================================
-# 🔥 SPLIT GEOMETRY FOR SL FACE INDEX CONTROL
+# 🔥 LOD BUILDER
 # ==========================================
-def write_dae_split(verts, out_f, in_f, cap_f, uvs, normals):
+def build_lods(params):
+
+    lods = []
+
+    # High
+    lods.append(build_base_mesh(params, quality=1.0))
+
+    # Medium
+    lods.append(build_base_mesh(params, quality=0.5))
+
+    # Low
+    lods.append(build_base_mesh(params, quality=0.25))
+
+    # Lowest (decimated)
+    v, f_out, f_in, f_cap, u, n = build_base_mesh(params, quality=0.15)
+    f_out = decimate_faces(f_out, 0.5)
+    lods.append((v, f_out, f_in, f_cap, u, n))
+
+    return lods
+
+
+# ==========================================
+# 🔥 DAE WRITER WITH LODS
+# ==========================================
+def write_dae_lods(lods):
 
     def pack(faces):
         s = ""
@@ -189,35 +163,40 @@ def write_dae_split(verts, out_f, in_f, cap_f, uvs, normals):
                 s += f"{i} {i} {i} "
         return s
 
-    v = " ".join(f"{x} {y} {z}" for x, y, z in verts)
-    n = " ".join(f"{x} {y} {z}" for x, y, z in normals)
-    uv = " ".join(f"{u} {v}" for u, v in uvs)
+    geo_blocks = ""
 
-    def geo_block(id_name, faces):
-        return f"""
-<geometry id="{id_name}"><mesh>
-<source id="{id_name}_pos"><float_array count="{len(verts)*3}">{v}</float_array>
-<technique_common><accessor source="#{id_name}_pos" count="{len(verts)}" stride="3">
-<param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+    for i, (verts, f_out, f_in, f_cap, uvs, normals) in enumerate(lods):
+
+        v = " ".join(f"{x} {y} {z}" for x, y, z in verts)
+        n = " ".join(f"{x} {y} {z}" for x, y, z in normals)
+        uv = " ".join(f"{u} {v}" for u, v in uvs)
+
+        geo_blocks += f"""
+<geometry id="lod{i}"><mesh>
+<source id="p{i}"><float_array count="{len(verts)*3}">{v}</float_array>
+<technique_common><accessor source="#p{i}" count="{len(verts)}" stride="3">
+<param name="X"/><param name="Y"/><param name="Z"/>
 </accessor></technique_common></source>
 
-<source id="{id_name}_norm"><float_array count="{len(normals)*3}">{n}</float_array>
-<technique_common><accessor source="#{id_name}_norm" count="{len(normals)}" stride="3">
-<param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
+<source id="n{i}"><float_array count="{len(normals)*3}">{n}</float_array>
+<technique_common><accessor source="#n{i}" count="{len(normals)}" stride="3">
+<param name="X"/><param name="Y"/><param name="Z"/>
 </accessor></technique_common></source>
 
-<source id="{id_name}_uv"><float_array count="{len(uvs)*2}">{uv}</float_array>
-<technique_common><accessor source="#{id_name}_uv" count="{len(uvs)}" stride="2">
-<param name="S" type="float"/><param name="T" type="float"/>
+<source id="uv{i}"><float_array count="{len(uvs)*2}">{uv}</float_array>
+<technique_common><accessor source="#uv{i}" count="{len(uvs)}" stride="2">
+<param name="S"/><param name="T"/>
 </accessor></technique_common></source>
 
-<vertices id="{id_name}_v"><input semantic="POSITION" source="#{id_name}_pos"/></vertices>
+<vertices id="v{i}">
+<input semantic="POSITION" source="#p{i}"/>
+</vertices>
 
-<triangles count="{len(faces)}">
-<input semantic="VERTEX" source="#{id_name}_v" offset="0"/>
-<input semantic="NORMAL" source="#{id_name}_norm" offset="1"/>
-<input semantic="TEXCOORD" source="#{id_name}_uv" offset="2"/>
-<p>{pack(faces)}</p>
+<triangles count="{len(f_out)}">
+<input semantic="VERTEX" source="#v{i}" offset="0"/>
+<input semantic="NORMAL" source="#n{i}" offset="1"/>
+<input semantic="TEXCOORD" source="#uv{i}" offset="2"/>
+<p>{pack(f_out)}</p>
 </triangles>
 </mesh></geometry>
 """
@@ -226,24 +205,23 @@ def write_dae_split(verts, out_f, in_f, cap_f, uvs, normals):
 <COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
 
 <library_geometries>
-{geo_block("outside", out_f)}
-{geo_block("inside", in_f)}
-{geo_block("caps", cap_f)}
+{geo_blocks}
 </library_geometries>
+
+<scene>
+<instance_visual_scene url="#Scene"/>
+</scene>
 
 <library_visual_scenes>
 <visual_scene id="Scene">
 <node>
-<instance_geometry url="#outside"/>
-<instance_geometry url="#inside"/>
-<instance_geometry url="#caps"/>
+<instance_geometry url="#lod0"/>
 </node>
 </visual_scene>
 </library_visual_scenes>
 
-<scene><instance_visual_scene url="#Scene"/></scene>
-
-</COLLADA>"""
+</COLLADA>
+"""
 
     with open(OUTPUT, "w") as f:
         f.write(dae)
@@ -257,7 +235,9 @@ def generate():
     raw = request.data.decode("utf-8")
     params = dict(p.split("=") for p in raw.split("|") if "=" in p)
 
-    build_prim(params)
+    lods = build_lods(params)
+    write_dae_lods(lods)
+
     return f"{BASE_URL}/download"
 
 
