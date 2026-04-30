@@ -8,6 +8,47 @@ OUTPUT = "shape.dae"
 BASE_URL = "https://m3-mesh-engine.onrender.com"
 
 # =========================
+# NEW: SL-STYLE PRISM
+# =========================
+def buildprism():
+    width = 0.2
+    depth = 0.2
+    height = 0.2
+
+    w = width / 2
+    d = depth / 2
+    h = height / 2
+
+    verts = [
+        (-w, -d, -h),  # 0 bottom back left
+        ( w, -d, -h),  # 1 bottom back right
+        ( w,  d, -h),  # 2 bottom front right
+        (-w,  d, -h),  # 3 bottom front left
+
+        (-w, -d,  h),  # 4 top back left
+        ( w, -d,  h),  # 5 top back right
+
+        (0,  d,  h),   # 6 top front center (sloped peak)
+    ]
+
+    faces = [
+        # bottom
+        (0, 1, 2), (0, 2, 3),
+        # back wall
+        (0, 4, 1), (1, 4, 5),
+        # left slope
+        (0, 3, 4),
+        # right slope
+        (1, 5, 2),
+        # front slope
+        (3, 2, 6),
+        # top
+        (4, 6, 5)
+    ]
+
+    write_dae(verts, faces)
+
+# =========================
 # REAL TORUS
 # =========================
 def buildtorus():
@@ -173,12 +214,14 @@ def home():
 @app.route("/generate", methods=["POST"])
 def generate():
     data = request.data.decode("utf-8")
-    print("RAW DATA:", data)  # DEBUG
+    print("RAW DATA:", data)  # Keep Debugging
 
-    if "Torus" in data:
-        buildtorus()
-    elif "Cylinder" in data:
+    if "Cylinder" in data:
         buildcylinder()
+    elif "Torus" in data:
+        buildtorus()
+    elif "Prism" in data:
+        buildprism()
     elif "Sphere" in data:
         buildsphere()
     else:
