@@ -1,11 +1,46 @@
-from flask import Flask, request
+from flask import Flask, request, send_file, make_response
+import math
 
 app = Flask(__name__)
 
 OUTPUT = "sphere.dae"
 
 def buildsphere():
-    content = """<?xml version="1.0" encoding="utf-8"?>
+    segments = 16
+    rings = 12
+    radius = 0.1
+
+    verts = []
+    faces = []
+
+    # generate vertices
+    for i in range(rings + 1):
+        phi = math.pi * i / rings
+        for j in range(segments):
+            theta = 2 * math.pi * j / segments
+            x = radius * math.sin(phi) * math.cos(theta)
+            y = radius * math.sin(phi) * math.sin(theta)
+            z = radius * math.cos(phi)
+            verts.append((x, y, z))
+
+    # generate faces
+    for i in range(rings):
+        for j in range(segments):
+            a = i * segments + j
+            b = a + segments
+            c = b + 1 if (j + 1) < segments else b + 1 - segments
+            d = a + 1 if (j + 1) < segments else a + 1 - segments
+
+            if i != 0:
+                faces.append((a, b, d))
+            if i != rings - 1:
+                faces.append((d, b, c))
+
+    # flatten arrays
+    vert_array = " ".join(f"{v[0]} {v[1]} {v[2]}" for v in verts)
+    index_array = " ".join(str(i) for f in faces for i in f)
+
+    dae = f'''<?xml version="1.0" encoding="utf-8"?>
 <COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
   <asset>
     <unit name="meter" meter="1"/>
@@ -16,18 +51,12 @@ def buildsphere():
     <geometry id="sphere" name="sphere">
       <mesh>
 
-        <source id="spherePos">
-          <float_array id="sphereArr" count="72">
-          0 0 0.1   0.1 0 0   0 0.1 0
-          -0.1 0 0  0 -0.1 0  0 0 -0.1
-          0.07 0.07 0  -0.07 0.07 0
-          -0.07 -0.07 0  0.07 -0.07 0
-          0 0.07 0.07  0 -0.07 0.07
-          0 0.07 -0.07 0 -0.07 -0.07
+        <source id="pos">
+          <float_array id="posArr" count="{len(verts)*3}">
+            {vert_array}
           </float_array>
-
           <technique_common>
-            <accessor source="#sphereArr" count="24" stride="3">
+            <accessor source="#posArr" count="{len(verts)}" stride="3">
               <param name="X" type="float"/>
               <param name="Y" type="float"/>
               <param name="Z" type="float"/>
@@ -35,22 +64,13 @@ def buildsphere():
           </technique_common>
         </source>
 
-        <vertices id="sphereVerts">
-          <input semantic="POSITION" source="#spherePos"/>
+        <vertices id="verts">
+          <input semantic="POSITION" source="#pos"/>
         </vertices>
 
-        <triangles count="8">
-          <input semantic="VERTEX" source="#sphereVerts" offset="0"/>
-          <p>
-          0 1 2
-          0 2 3
-          0 3 4
-          0 4 1
-          5 1 2
-          5 2 3
-          5 3 4
-          5 4 1
-          </p>
+        <triangles count="{len(faces)}">
+          <input semantic="VERTEX" source="#verts" offset="0"/>
+          <p>{index_array}</p>
         </triangles>
 
       </mesh>
@@ -68,10 +88,10 @@ def buildsphere():
   <scene>
     <instance_visual_scene url="#Scene"/>
   </scene>
-</COLLADA>
-"""
+</COLLADA>'''
+
     with open(OUTPUT, "w") as f:
-        f.write(content)
+        f.write(dae)
 
 @app.route("/")
 def home():
@@ -79,20 +99,13 @@ def home():
 
 @app.route("/generate", methods=["POST"])
 def generate():
-    try:
-        data = request.data.decode("utf-8")
-        print("Received:", data)
-
-        buildsphere()
-
-        return "Download ready: https://m3-mesh-engine.onrender.com/download"
-
-    except Exception as e:
-        return str(e)
+    buildsphere()
+    response = make_response("Download ready")
+    response.headers["Content-Type"] = "text/plain"
+    return response
 
 @app.route("/download")
 def download():
-    from flask import send_file
     return send_file(OUTPUT, as_attachment=True)
 
 if __name__ == "__main__":
